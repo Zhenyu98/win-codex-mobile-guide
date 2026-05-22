@@ -173,18 +173,7 @@ remoteControl/status/read returned connected with non-null environmentId
 - Codex 版本是否变化。
 - OpenAI 是否已经正式开放 Windows 手机连接支持。
 
-## 隐私与发布注意事项
-
-不要公开发布这些内容：
-
-- ChatGPT 邮箱。
-- 机器名，除非你明确不介意。
-- `installationId`。
-- `environmentId`。
-- `%USERPROFILE%\.codex` 的完整配置和状态文件。
-- Codex 日志原文，尤其是包含账号、路径、SSH host、MCP server、插件配置的部分。
-
-### 日志默认策略
+## 日志与本地调试
 
 `try-remote-control-enable.mjs` 默认会：
 
@@ -193,7 +182,7 @@ remoteControl/status/read returned connected with non-null environmentId
 - 对 JSON 字段中的机器名、邮箱、账号字段、用户/租户字段、路径字段、profile 字段、`installationId`、`environmentId` 等做脱敏。
 - 对 stdout/stderr 的纯字符串日志也做基础脱敏，包括邮箱、`C:\Users\<name>` 路径、`DESKTOP-*` 机器名、UUID、`env_*`、IPv4 地址。
 
-这只是降低风险，不是强安全保证。Codex app-server 的原始输出可能包含新的字段名或新的日志格式，脚本无法保证覆盖所有未来情况。
+这些日志主要给本地用户或本地 agent 判断 remote-control 状态使用。默认脱敏只是降低误传风险，不是强安全保证；Codex app-server 的原始输出可能包含新的字段名或新的日志格式，脚本无法保证覆盖所有未来情况。
 
 如果你需要指定日志目录：
 
@@ -201,25 +190,13 @@ remoteControl/status/read returned connected with non-null environmentId
 node .\scripts\try-remote-control-enable.mjs --log-dir="%TEMP%\codex-remote-control"
 ```
 
-如果你为了本地调试必须保留原始日志，可以加：
+如果你为了本机深度调试必须保留原始日志，可以加：
 
 ```powershell
 node .\scripts\try-remote-control-enable.mjs --no-redact
 ```
 
-不要把 `--no-redact` 生成的日志上传到 GitHub issue、公开论坛或第三方 AI 平台。
-
-如果需要贴 issue，建议只贴脱敏后的摘要：
-
-```text
-status before enable: disabled
-status after enable: connected
-environmentId: <redacted non-null>
-machine: <redacted>
-Codex version: <version>
-OS: Windows <version>
-network: proxy/TUN on or off
-```
+`--no-redact` 适合临时交给你信任的本地 agent 分析。调试结束后，建议删除对应的 `remote-control-enable-*.log`。
 
 ## 还原配置
 

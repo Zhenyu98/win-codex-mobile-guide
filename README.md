@@ -61,7 +61,7 @@ True
 进入本项目目录，运行：
 
 ```powershell
-node .\scripts\try-remote-control-enable.mjs --port=17897 --keep-alive=600
+node .\scripts\try-remote-control-enable.mjs --keep-alive=600
 ```
 
 看到类似输出后再操作手机：
@@ -97,6 +97,12 @@ environmentId: <non-null>
 powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1" -Port 17897
 ```
 
+如果你没有手动指定端口，也可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1"
+```
+
 ## 核心原理
 
 这个流程有两层：
@@ -126,7 +132,7 @@ environmentId != null
 | 报 `Unknown feature flag: remote_connections` | 把配置名当成了 app-server `--enable` flag | app-server 命令只传 `--enable remote_control` |
 | PowerShell 报 `ConvertFrom-Json` 没有 `-Depth` 参数 | Windows PowerShell 5.1 不支持该参数 | 删除 `ConvertFrom-Json -Depth`，或用 PowerShell 7+ |
 | Node 报 `spawn EINVAL` | Windows 下直接 spawn `.cmd` 包装脚本失败 | 使用脚本内置的真实 `codex.exe` 查找逻辑，或用 `shell` 启动 |
-| 临时端口被占用 | 上次脚本退出时进程未清干净 | 运行 `stop-remote-control-enable.ps1`，或换一个端口 |
+| 临时端口被占用 | 上次脚本退出时进程未清干净，或手动指定了冲突端口 | 不指定 `--port` 让脚本自动挑空闲端口，或运行 `stop-remote-control-enable.ps1` |
 | 日志里出现 plugin catalog `403 Forbidden` | 插件同步被拦或 Cloudflare challenge；不一定影响 remote control | 如果 remote-control 已 `connected`，可暂时忽略 |
 | 手机授权提示安全设置错误 | 账号安全认证、移动端登录态或服务端安全门槛 | 先完成 ChatGPT 账号安全验证，再退出重登手机 App |
 | 修改 SSH 配置没有改善 | SSH Remote 和手机 remote-control 注册不是同一条链路 | 只有日志明确指向 SSH/Remote SSH 时才改 SSH |
@@ -177,6 +183,31 @@ remoteControl/status/read returned connected with non-null environmentId
 - `environmentId`。
 - `%USERPROFILE%\.codex` 的完整配置和状态文件。
 - Codex 日志原文，尤其是包含账号、路径、SSH host、MCP server、插件配置的部分。
+
+### 日志默认策略
+
+`try-remote-control-enable.mjs` 默认会：
+
+- 随机选择一个空闲本地端口，而不是固定使用 `17897`。
+- 将日志写到系统临时目录下的 `codex-remote-control` 文件夹。
+- 对 JSON 字段中的机器名、邮箱、账号字段、用户/租户字段、路径字段、profile 字段、`installationId`、`environmentId` 等做脱敏。
+- 对 stdout/stderr 的纯字符串日志也做基础脱敏，包括邮箱、`C:\Users\<name>` 路径、`DESKTOP-*` 机器名、UUID、`env_*`、IPv4 地址。
+
+这只是降低风险，不是强安全保证。Codex app-server 的原始输出可能包含新的字段名或新的日志格式，脚本无法保证覆盖所有未来情况。
+
+如果你需要指定日志目录：
+
+```powershell
+node .\scripts\try-remote-control-enable.mjs --log-dir="%TEMP%\codex-remote-control"
+```
+
+如果你为了本地调试必须保留原始日志，可以加：
+
+```powershell
+node .\scripts\try-remote-control-enable.mjs --no-redact
+```
+
+不要把 `--no-redact` 生成的日志上传到 GitHub issue、公开论坛或第三方 AI 平台。
 
 如果需要贴 issue，建议只贴脱敏后的摘要：
 
@@ -232,7 +263,10 @@ remote_connections = true
 
 因为只读只保住配置，不会自动恢复 remote-control backend 注册态。注册态丢了以后，需要重新触发 `remoteControl/enable`。
 
+### 为什么脚本默认不再固定使用 17897？
+
+固定端口本身不是严重隐私问题，但长期公开复用固定端口会增加被关联和冲突的概率。脚本现在默认自动挑选空闲本地端口；只有需要配合其他调试工具时才建议手动传 `--port=17897` 或其他端口。
+
 ## 参考
 
 - OpenAI: [Work with Codex from anywhere](https://openai.com/index/work-with-codex-from-anywhere/)
-

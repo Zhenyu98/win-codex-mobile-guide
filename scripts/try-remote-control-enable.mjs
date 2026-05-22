@@ -1,15 +1,16 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
-const port = Number(args.port ?? 17897);
+let port = Number(args.port ?? process.env.CODEX_REMOTE_CONTROL_PORT ?? 0);
 const keepAliveSeconds = Number(args["keep-alive"] ?? 600);
 const connectTimeoutMs = Number(args["connect-timeout-ms"] ?? 45000);
 const redactLogs = args["no-redact"] !== true;
-const url = `ws://127.0.0.1:${port}`;
-const logDir = path.resolve(String(args["log-dir"] ?? process.cwd()));
+let url = "";
+const logDir = path.resolve(String(args["log-dir"] ?? defaultLogDir()));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const logPath = path.join(logDir, `remote-control-enable-${stamp}.log`);
 const codexCmd = findCodexCommand();
@@ -26,6 +27,10 @@ function parseArgs(rawArgs) {
     }
   }
   return parsed;
+}
+
+function defaultLogDir() {
+  return path.join(os.tmpdir(), "codex-remote-control");
 }
 
 function findCodexCommand() {
@@ -60,6 +65,41 @@ function findCodexCommand() {
   return path.join(appData, "npm", "codex.cmd");
 }
 
+function redactString(text) {
+  if (!redactLogs || typeof text !== "string") {
+    return text;
+  }
+
+  return text
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "<redacted-email>")
+    .replace(/\\\\\?\\C:\\Users\\[^\\\s"'<>]+/gi, "\\\\?\\C:\\Users\\<redacted-user>")
+    .replace(/C:\\Users\\[^\\\s"'<>]+/gi, "C:\\Users\\<redacted-user>")
+    .replace(/\bDESKTOP-[A-Z0-9-]+\b/g, "<redacted-machine>")
+    .replace(/\benv_[A-Za-z0-9_-]+\b/g, "<redacted-environment-id>")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "<redacted-uuid>")
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "<redacted-ip>");
+}
+
+function shouldRedactField(key) {
+  const lower = key.toLowerCase();
+  return lower.includes("email") ||
+    lower.includes("account") ||
+    lower.includes("userid") ||
+    lower.includes("user_id") ||
+    lower.includes("tenant") ||
+    lower.includes("workspace") ||
+    lower.includes("profile") ||
+    lower.includes("codexhome") ||
+    lower.includes("home") ||
+    lower.includes("path") ||
+    lower.includes("dir") ||
+    lower.includes("hostname") ||
+    lower.includes("hostid") ||
+    lower === "servername" ||
+    lower === "installationid" ||
+    lower === "environmentid";
+}
+
 function redact(value) {
   if (!redactLogs) {
     return value;
@@ -69,20 +109,18 @@ function redact(value) {
     return value.map(redact);
   }
 
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+
   if (!value || typeof value !== "object") {
     return value;
   }
 
   const result = {};
   for (const [key, childValue] of Object.entries(value)) {
-    if (key === "serverName") {
-      result[key] = childValue ? "<redacted-machine>" : childValue;
-    } else if (key === "installationId") {
-      result[key] = childValue ? "<redacted-installation-id>" : childValue;
-    } else if (key === "environmentId") {
-      result[key] = childValue ? "<redacted-environment-id>" : childValue;
-    } else if (key.toLowerCase().includes("email")) {
-      result[key] = childValue ? "<redacted-email>" : childValue;
+    if (shouldRedactField(key)) {
+      result[key] = childValue ? `<redacted-${key}>` : childValue;
     } else {
       result[key] = redact(childValue);
     }
@@ -100,6 +138,24 @@ function log(message, data) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const selectedPort = typeof address === "object" && address ? address.port : null;
+      server.close(() => {
+        if (selectedPort) {
+          resolve(selectedPort);
+        } else {
+          reject(new Error("Could not allocate a free local port"));
+        }
+      });
+    });
+  });
 }
 
 async function waitForWsReady(timeoutMs = 15000) {
@@ -240,6 +296,15 @@ function stopProcessTree(child) {
 }
 
 async function main() {
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid --port value: ${port}`);
+  }
+
+  if (port === 0) {
+    port = await getFreePort();
+  }
+  url = `ws://127.0.0.1:${port}`;
+
   log(`Log file: ${logPath}`);
   log(`Starting temporary app-server on ${url}`);
   log(`Codex command: ${codexCmd}`);
@@ -321,4 +386,3 @@ main().catch((error) => {
   log("FATAL", { message: error.message, stack: error.stack });
   process.exitCode = 1;
 });
-

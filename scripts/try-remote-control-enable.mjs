@@ -6,7 +6,7 @@ import path from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
 let port = Number(args.port ?? process.env.CODEX_REMOTE_CONTROL_PORT ?? 0);
-const keepAliveSeconds = Number(args["keep-alive"] ?? 600);
+const keepAliveSeconds = Number(args["keep-alive"] ?? 0);
 const connectTimeoutMs = Number(args["connect-timeout-ms"] ?? 45000);
 const redactLogs = args["no-redact"] !== true;
 let url = "";
@@ -129,8 +129,9 @@ function redact(value) {
 }
 
 function log(message, data) {
+  const safeMessage = redactString(message);
   const safeData = data === undefined ? undefined : redact(data);
-  const line = safeData === undefined ? message : `${message} ${JSON.stringify(safeData, null, 2)}`;
+  const line = safeData === undefined ? safeMessage : `${safeMessage} ${JSON.stringify(safeData, null, 2)}`;
   console.log(line);
   fs.mkdirSync(logDir, { recursive: true });
   fs.appendFileSync(logPath, `${line}${os.EOL}`, "utf8");
@@ -138,6 +139,17 @@ function log(message, data) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForStopSignal() {
+  return new Promise((resolve) => {
+    const finish = (signal) => {
+      log(`Received ${signal}; stopping temporary app-server.`);
+      resolve();
+    };
+    process.once("SIGINT", () => finish("SIGINT"));
+    process.once("SIGTERM", () => finish("SIGTERM"));
+  });
 }
 
 function getFreePort() {
@@ -370,6 +382,9 @@ async function main() {
     if (keepAliveSeconds > 0) {
       log(`Keeping temporary app-server alive for ${keepAliveSeconds}s. Check ChatGPT/Codex mobile now.`);
       await delay(keepAliveSeconds * 1000);
+    } else {
+      log("Keeping temporary app-server alive until stopped. Leave this process running while using mobile remote control.");
+      await waitForStopSignal();
     }
   } finally {
     try {

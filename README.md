@@ -61,7 +61,7 @@ True
 进入本项目目录，运行：
 
 ```powershell
-node .\scripts\try-remote-control-enable.mjs --keep-alive=600
+node .\scripts\try-remote-control-enable.mjs
 ```
 
 看到类似输出后再操作手机：
@@ -75,6 +75,14 @@ remote-control connected? true
 ```text
 status: connected
 environmentId: <non-null>
+```
+
+保持这个 PowerShell 窗口和脚本运行。手机远程连接依赖这个临时 app-server；脚本退出后，设备可能重新显示离线。
+
+如果只是做短时测试，可以限制存活时间：
+
+```powershell
+node .\scripts\try-remote-control-enable.mjs --keep-alive=600
 ```
 
 ### 4. 手机端连接
@@ -94,13 +102,13 @@ environmentId: <non-null>
 连接成功后，如果你想清理临时 app-server：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1" -Port 17897
+powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1"
 ```
 
-如果你没有手动指定端口，也可以直接运行：
+如果你启动时手动指定了端口，也可以精确停止对应端口：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1"
+powershell -ExecutionPolicy Bypass -File ".\scripts\stop-remote-control-enable.ps1" -Port 17897
 ```
 
 ## 核心原理
@@ -124,6 +132,7 @@ environmentId != null
 | 现象 | 更可能的原因 | 建议处理 |
 | --- | --- | --- |
 | 手机只显示旧设备，点重新连接没反应 | 手机端或账号侧有 stale device record；本机没有完成新的 enable/registration | 先运行 `try-remote-control-enable.mjs`，等本机 `connected` 后再强杀手机 App 重进 |
+| 曾经连通，脚本/电脑重启后设备又离线 | 用于承载 remote-control 的临时 app-server 已退出 | 重新运行脚本，并保持它在使用期间持续运行 |
 | 手机出现多个同名 Windows 设备 | 多次 profile reset 或多次注册造成云端/手机端旧记录残留 | 不要继续重置 profile；选最近在线的设备 |
 | `config.toml` 里 `remote_control` 自动消失 | Codex Desktop 启动时移除了实验开关 | 写回 `remote_control = true` 后执行 `attrib +R` |
 | `remoteControl/status/read` 返回 `disabled` | remote-control API 存在，但还没 enable | 运行脚本发送 `remoteControl/enable` |
@@ -154,8 +163,8 @@ remoteControl/status/read returned connected with non-null environmentId
 ```
 
 6. 如果本机已 `connected`，再让用户操作手机。
-7. 不要因为手机端有旧设备记录就反复清 profile 或卸载重装。
-8. 不要在公开 issue 或 README 中粘贴未经脱敏的日志。
+7. 连接成功后保持脚本/app-server 存活；不要在连接刚成功后清理临时进程。
+8. 不要因为手机端有旧设备记录就反复清 profile 或卸载重装。
 
 ### 什么时候停止折腾本地配置
 
@@ -178,6 +187,7 @@ remoteControl/status/read returned connected with non-null environmentId
 `try-remote-control-enable.mjs` 默认会：
 
 - 随机选择一个空闲本地端口，而不是固定使用 `17897`。
+- 在连接成功后持续运行，直到用户按 `Ctrl+C` 或调用停止脚本。
 - 将日志写到系统临时目录下的 `codex-remote-control` 文件夹。
 - 对 JSON 字段中的机器名、邮箱、账号字段、用户/租户字段、路径字段、profile 字段、`installationId`、`environmentId` 等做脱敏。
 - 对 stdout/stderr 的纯字符串日志也做基础脱敏，包括邮箱、`C:\Users\<name>` 路径、`DESKTOP-*` 机器名、UUID、`env_*`、IPv4 地址。
